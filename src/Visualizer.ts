@@ -120,7 +120,8 @@ export class Visualizer {
       rows: number;
       cols: number;
       getE_z(t: number, i: number, j: number): number;
-
+      idx_Ez(t: number, i: number, j: number): number;
+      idx_cEz(i: number, j: number): number;
       // optional material overlays (if present, PEC overrides field color)
       eps?: Float32Array;
       pec?: Uint8Array;
@@ -133,13 +134,13 @@ export class Visualizer {
     const hasMask = !!sim.pec && !!sim.eps;
 
     for (let i = 0; i < sim.rows; i++) {
-      const x = this.x0 + i * this.gridSpacingV;
+      const y = this.y0 + i * this.gridSpacingH;
       for (let j = 0; j < sim.cols; j++) {
-        const y = this.y0 + j * this.gridSpacingH;
+        const x = this.x0 + j * this.gridSpacingV;
+
+        const idx = sim.idx_cEz(i, j);
 
         if (hasMask) {
-          const idx = i * sim.cols + j;
-
           // PEC overrides everything
           if (sim.pec![idx] === 0) {
             ctx.fillStyle = this.pecColor;
@@ -176,6 +177,8 @@ export class Visualizer {
       rows: number;
       cols: number;
       getE_z(t: number, i: number, j: number): number;
+      idx_Ez(t: number, i: number, j: number): number;
+      idx_cEz(i: number, j: number): number;
       eps?: Float32Array;
       pec?: Uint8Array;
     },
@@ -196,9 +199,6 @@ export class Visualizer {
     const minDt = maxFps > 0 ? 1000 / maxFps : 0;
     let lastT = 0;
 
-    const drawMaterialsEachFrame = opts?.drawMaterialsEachFrame ?? false;
-    const canDrawMaterials = !!sim.eps && !!sim.pec;
-
     const tick = (t: number) => {
       if (!running) return;
 
@@ -211,9 +211,6 @@ export class Visualizer {
       this.clear();
 
       // If materials are static, draw once outside the animation loop instead (faster).
-      if (drawMaterialsEachFrame && canDrawMaterials) {
-        this.drawMaterials(sim as any);
-      }
 
       this.drawEField(epoch, sim, colorRange);
       opts?.onFrame?.(epoch);

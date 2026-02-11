@@ -1,3 +1,7 @@
+import { create, all } from "mathjs";
+import type { Complex } from "mathjs";
+const math = create(all);
+
 const C = 299792458;
 const EPS0 = 8.8541878188e-12;
 const MU0 = 4 * Math.PI * 1e-7;
@@ -112,9 +116,9 @@ export class Simulator {
     up: number,
     down: number,
   ) {
-    const m = 3;
+    const m = 4;
 
-    const R = 1e-8; // Target reflectance
+    const R = 1e-9; // Target reflectance
 
     this.cEx = this.eps.map((v, _) => this.dt / (EPS0 * v));
     this.cEy = this.eps.map((v, _) => this.dt / (EPS0 * v));
@@ -128,6 +132,9 @@ export class Simulator {
 
     // For now use free space only
     // If that changes EPS0 has to be changed to a EPS0 * eps_r
+    //
+    //
+    // TODO: Separate indexing for H fields (different bounds)
     const sigma_max_left =
       (-((m + 1) * EPS0 * C) / (2 * this.dx * left)) * Math.log(R);
     const sigma_max_right =
@@ -157,8 +164,8 @@ export class Simulator {
       }
     }
 
-    for (let j = this.cols + 2 - right; j < this.cols + 2; j++) {
-      const s = Math.pow((j + 1 - (this.cols + 2 - right)) / right, m);
+    for (let j = this.cols - right; j < this.cols; j++) {
+      const s = Math.pow((j + 1 - (this.cols - right)) / right, m);
 
       for (let i = 0; i < this.rows; i++) {
         const sigmaX = s * sigma_max_right;
@@ -199,8 +206,8 @@ export class Simulator {
       }
     }
 
-    for (let i = this.rows + 2 - down; i < this.rows + 2; i++) {
-      const s = Math.pow((i + 1 - (this.rows + 2 - down)) / down, m);
+    for (let i = this.rows - down; i < this.rows; i++) {
+      const s = Math.pow((i + 1 - (this.rows - down)) / down, m);
 
       for (let j = 0; j < this.cols; j++) {
         const sigmaY = s * sigma_max_down;
@@ -223,7 +230,7 @@ export class Simulator {
   }
 
   private Hy_inc_at(k: number, i: number, j: number) {
-    const H = -(1 / Math.sqrt(MU0 / EPS0)) * this.Ez_inc_at(k - 0.5, i, j);
+    const H = -(1 / Math.sqrt(MU0 / EPS0)) * this.Ez_inc_at(k, i, j);
 
     return H;
   }
@@ -231,7 +238,7 @@ export class Simulator {
   private Ez_inc_at(k: number, i: number, j: number) {
     const t = k * this.dt - (j * this.dx) / C;
     const m = 1;
-    const y_sine = Math.sin((m * Math.PI * (i + 0.5)) / this.rows);
+    const y_sine = Math.sin((m * Math.PI * (i + 0.5)) / (this.rows - 2));
     const E = this.E0 * y_sine * this.gaussSine(t, this.f0, this.t0, this.tau);
 
     return E;
@@ -264,7 +271,7 @@ export class Simulator {
     let corr_E = 0;
     if (j === this.huygens_j - 1) {
       // Outside (scattered field)
-      corr_E = -this.Ez_inc_at(k, i, j) / this.dx;
+      corr_E = -this.Ez_inc_at(k, i, this.huygens_j) / this.dx;
     }
     const y_curl =
       (this.Ez[this.idx_Ez(k - 1, i, j + 1)] -
@@ -286,8 +293,8 @@ export class Simulator {
     // I.e. i+1/2 in E grid <=> i in H grid
     let corr_H = 0;
     if (j == this.huygens_j) {
-      // Outside (scattered field)
-      corr_H = -this.Hy_inc_at(k, i, j - 0.5) / this.dx;
+      // Inside (total field)
+      corr_H = -this.Hy_inc_at(k + 0.5, i, this.huygens_j - 1 + 0.5) / this.dx;
     }
     const z_curl =
       (this.Hy[this.idx_Hy(k, i, j)] - this.Hy[this.idx_Hy(k, i, j - 1)]) /
@@ -357,8 +364,8 @@ export class Simulator {
     mu_r: number,
     eps_r: number,
   ) {
-    for (let i = y0; i < y0 + w; i++) {
-      for (let j = x0; j < x0 + h; j++) {
+    for (let i = y0; i < y0 + h; i++) {
+      for (let j = x0; j < x0 + w; j++) {
         this.eps[this.idx_g(i, j)] = eps_r;
         this.mu_x[this.idx_cHx(i, j)] = mu_r;
         this.mu_y[this.idx_cHy(i, j)] = mu_r;
@@ -366,8 +373,8 @@ export class Simulator {
     }
   }
   public injectRectPEC(x0: number, y0: number, w: number, h: number) {
-    for (let i = y0; i < y0 + w; i++) {
-      for (let j = x0; j < x0 + h; j++) {
+    for (let i = y0; i < y0 + h; i++) {
+      for (let j = x0; j < x0 + w; j++) {
         this.pec[this.idx_g(i, j)] = 0; // mark as perfect conductor
       }
     }
@@ -399,6 +406,37 @@ export class Simulator {
       }
       this.injectSoftEz(epoch);
     }
+  }
+
+  public getEzStatsFrequencies(i: number, j: number) {
+    const Ez_time = new Float32Array(this.epochs);
+    for (let n = 0; n < this.epochs; n++) {
+      Ez_time[n] = this.Ez[this.idx_Ez(n, i, j)];
+    }
+
+    const X = math.fft(Array.from(Ez_time)) as unknown as Complex[];
+
+    const N = this.epochs;
+    const half = Math.floor(N / 2) + 1;
+    const fs = 1 / this.dt;
+
+    const freqs = new Float32Array(half);
+    const mags = new Float32Array(half);
+
+    for (let k = 0; k < half; k++) {
+      freqs[k] = (k * fs) / N;
+
+      // magnitude (non-negative)
+      let m = Math.hypot(X[k].re, X[k].im);
+
+      // normalize and convert to single-sided amplitude spectrum
+      m /= N;
+      if (k !== 0 && !(N % 2 === 0 && k === half - 1)) m *= 2;
+
+      mags[k] = m;
+    }
+
+    return { freqs, mags };
   }
 
   public getE_z(epoch: number, i: number, j: number) {

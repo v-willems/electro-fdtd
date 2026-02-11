@@ -1,33 +1,98 @@
 import { Visualizer } from "./Visualizer.ts";
 import { Simulator } from "./Simulator.ts";
-import { Chart } from "chart.js/auto";
+import {
+  Chart,
+  type ChartConfiguration,
+  type ScatterDataPoint,
+  LineController,
+  LineElement,
+  PointElement,
+  LinearScale,
+  Title,
+  Tooltip,
+  Legend,
+} from "chart.js";
 
-const canvas = document.getElementById("grid") as HTMLCanvasElement;
+Chart.register(
+  LineController,
+  LineElement,
+  PointElement,
+  LinearScale,
+  Title,
+  Tooltip,
+  Legend,
+);
+
+const sim_canvas = document.getElementById("grid") as HTMLCanvasElement;
 const frameCounter = document.getElementById("framecounter") as HTMLDivElement;
-const ctx = canvas.getContext("2d");
-if (!ctx) throw new Error("2D context not available");
+const sim_ctx = sim_canvas.getContext("2d");
+if (!sim_ctx) throw new Error("2D context not available");
 
-const height = canvas.height;
-const width = canvas.width;
+const chart_canvas = document.getElementById("chart") as HTMLCanvasElement;
 
-ctx.fillStyle = "lightgray";
-ctx.fillRect(0, 0, width, height);
+const height = sim_canvas.height;
+const width = sim_canvas.width;
+
+sim_ctx.fillStyle = "lightgray";
+sim_ctx.fillRect(0, 0, width, height);
 
 const startBtn = document.getElementById(
   "startBtn",
 ) as HTMLButtonElement | null;
 if (!startBtn) throw new Error("startBtn not found");
 
-const epochs = 200;
+const epochs = 700;
 const simulator = new Simulator(epochs, 200, 400, 50);
-// simulator.injectGaussSineSource(100, 100);
-simulator.injectRectMaterial(150, 80, 40, 40, 2.8, 2.8);
-simulator.injectRectPEC(50, 1, 1, 350);
-simulator.injectRectPEC(50, 198, 1, 350);
+simulator.injectGaussSineSource(100, 100);
+simulator.injectRectMaterial(150, 1, 40, 198, 1, 10);
+simulator.injectRectPEC(50, 0, 350, 1);
+simulator.injectRectPEC(50, 198, 350, 1);
+simulator.injectRectPEC(150, 1, 40, 198);
 simulator.buildCoefficientArrays(30, 30, 0, 0);
 simulator.runSimulation();
 
-const viz = new Visualizer(ctx, {
+const { freqs, mags } = simulator.getEzStatsFrequencies(40, 50);
+
+const points: ScatterDataPoint[] = Array.from(freqs).map((f, idx) => ({
+  x: f,
+  y: mags[idx],
+}));
+
+const config: ChartConfiguration<"line", ScatterDataPoint[], number> = {
+  type: "line",
+  data: {
+    datasets: [
+      {
+        label: "FFT magnitude",
+        data: points,
+        parsing: false as const, // <- key change
+        pointRadius: 0,
+        borderWidth: 1,
+      },
+    ],
+  },
+  options: {
+    animation: false,
+    scales: {
+      x: {
+        type: "linear",
+        title: { display: true, text: "Frequency (Hz)" },
+        ticks: {
+          callback: (value) => (Number(value) / 1e9).toString(),
+        },
+        max: 30e9,
+        min: 0,
+      },
+      y: {
+        title: { display: true, text: "Magnitude" },
+      },
+    },
+  },
+};
+
+const chart = new Chart(chart_canvas, config);
+
+const viz = new Visualizer(sim_ctx, {
   x0: 0,
   y0: 0,
   gridSpacingV: 1,

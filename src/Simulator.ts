@@ -12,21 +12,8 @@ export class Simulator {
   public epochs: number;
 
   private Ez: Float32Array;
-  private Ezx: Float32Array;
-  private Ezy: Float32Array;
   private Hx: Float32Array;
   private Hy: Float32Array;
-
-  // Dampening coefficients for PML
-  private cEx: Float32Array;
-  private cEy: Float32Array;
-  private bEx: Float32Array;
-  private bEy: Float32Array;
-
-  private cHx: Float32Array;
-  private cHy: Float32Array;
-  private bHx: Float32Array;
-  private bHy: Float32Array;
 
   // derivative discretizations
   private dy: number;
@@ -48,8 +35,23 @@ export class Simulator {
   private t0: number; // center time
   private tau: number; // pulse width
 
-  private gaussSineSourcePositions: [number, number][] = [];
-  private sineSourcePositions: [number, number][] = [];
+  // UPML
+  private sigma_x: Float32Array;
+  private sigma_y: Float32Array;
+
+  private aEz: Float32Array;
+  private bEz: Float32Array;
+  private cEz: Float32Array;
+
+  private aHx: Float32Array;
+  private bHx: Float32Array;
+  private cHx: Float32Array;
+
+  private aHy: Float32Array;
+  private bHy: Float32Array;
+  private cHy: Float32Array;
+
+  private Ez_acc: Float32Array;
 
   constructor(
     epochs: number,
@@ -66,21 +68,8 @@ export class Simulator {
     const HyPlane = (rows + 2) * cols;
 
     this.Ez = new Float32Array(epochs * EzPlane);
-    this.Ezx = new Float32Array(epochs * EzPlane);
-    this.Ezy = new Float32Array(epochs * EzPlane);
     this.Hx = new Float32Array(epochs * HxPlane);
     this.Hy = new Float32Array(epochs * HyPlane);
-
-    // PML
-    this.cEx = new Float32Array(EzPlane);
-    this.cEy = new Float32Array(EzPlane);
-    this.bEx = new Float32Array(EzPlane);
-    this.bEy = new Float32Array(EzPlane);
-
-    this.cHx = new Float32Array(HxPlane);
-    this.cHy = new Float32Array(HyPlane);
-    this.bHx = new Float32Array(HxPlane);
-    this.bHy = new Float32Array(HyPlane);
 
     this.dx = 1e-3;
     this.dy = 1e-3;
@@ -106,127 +95,207 @@ export class Simulator {
     this.f0 = 1e10;
     this.t0 = 10 * this.dt;
     this.tau = 30 * this.dt;
+
+    this.sigma_x = new Float32Array(EzPlane);
+    this.sigma_x.fill(0);
+    this.sigma_y = new Float32Array(EzPlane);
+    this.sigma_y.fill(0);
+
+    this.aEz = new Float32Array(EzPlane);
+    this.bEz = new Float32Array(EzPlane);
+    this.cEz = new Float32Array(EzPlane);
+    this.aEz.fill(0);
+    this.bEz.fill(0);
+    this.cEz.fill(0);
+
+    this.aHx = new Float32Array(HxPlane);
+    this.bHx = new Float32Array(HxPlane);
+    this.cHx = new Float32Array(HxPlane);
+    this.aHx.fill(0);
+    this.bHx.fill(0);
+    this.cHx.fill(0);
+
+    this.aHy = new Float32Array(HyPlane);
+    this.bHy = new Float32Array(HyPlane);
+    this.cHy = new Float32Array(HyPlane);
+    this.aHy.fill(0);
+    this.bHy.fill(0);
+    this.cHy.fill(0);
+
+    this.Ez_acc = new Float32Array(EzPlane);
+    this.Ez_acc.fill(0);
   }
 
-  // Setup the PML coefficient and time update information
-  // PML region is forced to be air - prevent touching other material
-  public buildCoefficientArrays(
-    left: number,
-    right: number,
-    up: number,
-    down: number,
-  ) {
-    const m = 4;
-
-    const R = 1e-9; // Target reflectance
-
-    this.cEx = this.eps.map((v, _) => this.dt / (EPS0 * v));
-    this.cEy = this.eps.map((v, _) => this.dt / (EPS0 * v));
-    this.cHx = this.mu_x.map((v, _) => this.dt / (MU0 * v));
-    this.cHy = this.mu_y.map((v, _) => this.dt / (MU0 * v));
-
-    this.bEx.fill(1.0);
-    this.bEy.fill(1.0);
-    this.bHx.fill(1.0);
-    this.bHy.fill(1.0);
-
-    // For now use free space only
-    // If that changes EPS0 has to be changed to a EPS0 * eps_r
-    //
-    //
-    // TODO: Separate indexing for H fields (different bounds)
-    const sigma_max_left =
-      (-((m + 1) * EPS0 * C) / (2 * this.dx * left)) * Math.log(R);
-    const sigma_max_right =
-      (-((m + 1) * EPS0 * C) / (2 * this.dx * right)) * Math.log(R);
-    const sigma_max_up =
-      (-((m + 1) * EPS0 * C) / (2 * this.dy * up)) * Math.log(R);
-    const sigma_max_down =
-      (-((m + 1) * EPS0 * C) / (2 * this.dy * down)) * Math.log(R);
+  public buildUPML(left: number, right: number, up: number, down: number) {
+    const m = 3;
 
     for (let j = 0; j < left; j++) {
-      const s = Math.pow((left - (j + 1)) / left, m);
+      const sigma = (EPS0 / (2 * this.dt)) * Math.pow((j + 1) / left, m);
       for (let i = 0; i < this.rows; i++) {
-        const sigmaX = s * sigma_max_left;
-        const sigmaX_m = (MU0 / EPS0) * sigmaX; // magnetic field
-
-        this.cEx[this.idx_g(i, j)] =
-          this.dt / EPS0 / (1 + (sigmaX * this.dt) / (2 * EPS0));
-        this.bEx[this.idx_g(i, j)] =
-          (1 - (sigmaX * this.dt) / (2 * EPS0)) /
-          (1 + (sigmaX * this.dt) / (2 * EPS0));
-        this.bHx[this.idx_cHx(i, j)] =
-          (1 - (sigmaX_m * this.dt) / (2 * MU0)) /
-          (1 + (sigmaX_m * this.dt) / (2 * MU0));
-
-        this.cHx[this.idx_cHx(i, j)] =
-          this.dt / MU0 / (1 + (sigmaX_m * this.dt) / (2 * MU0));
+        this.sigma_x[this.idx_g(i, j)] = sigma;
       }
     }
-
-    for (let j = this.cols - right; j < this.cols; j++) {
-      const s = Math.pow((j + 1 - (this.cols - right)) / right, m);
-
+    for (let j = 0; j < right; j++) {
+      const sigma = (EPS0 / (2 * this.dt)) * Math.pow((right - j) / right, m);
+      const idx_j = this.cols - right + j;
       for (let i = 0; i < this.rows; i++) {
-        const sigmaX = s * sigma_max_right;
-        const sigmaX_m = (MU0 / EPS0) * sigmaX; // magnetic field
-        this.cEx[this.idx_g(i, j)] =
-          this.dt / EPS0 / (1 + (sigmaX * this.dt) / (2 * EPS0));
-        this.bEx[this.idx_g(i, j)] =
-          (1 - (sigmaX * this.dt) / (2 * EPS0)) /
-          (1 + (sigmaX * this.dt) / (2 * EPS0));
-        this.bHx[this.idx_cHx(i, j)] =
-          (1 - (sigmaX_m * this.dt) / (2 * MU0)) /
-          (1 + (sigmaX_m * this.dt) / (2 * MU0));
-
-        this.cHx[this.idx_cHx(i, j)] =
-          this.dt / MU0 / (1 + (sigmaX_m * this.dt) / (2 * MU0));
+        this.sigma_x[this.idx_g(i, idx_j)] = sigma;
       }
     }
-
     for (let i = 0; i < up; i++) {
-      const s = Math.pow((up - (i + 1)) / up, m);
-
+      const sigma = (EPS0 / (2 * this.dt)) * Math.pow((i + 1) / up, m);
       for (let j = 0; j < this.cols; j++) {
-        const sigmaY = s * sigma_max_up;
-        const sigmaY_m = (MU0 / EPS0) * sigmaY; // magnetic field
+        this.sigma_y[this.idx_g(i, j)] = sigma;
+      }
+    }
+    for (let i = 0; i < down; i++) {
+      const sigma = (EPS0 / (2 * this.dt)) * Math.pow((down - i) / down, m);
+      const idx_i = this.rows - down + i;
+      for (let j = 0; j < this.cols; j++) {
+        this.sigma_y[this.idx_g(idx_i, j)] = sigma;
+      }
+    }
+    // TODO when iterating over Hx, Hy dont forget to start at 1,
+    // end at rows/cols to stay consistent with sigma_x,y based on Ez grid.
 
-        this.cEy[this.idx_g(i, j)] =
-          this.dt / EPS0 / (1 + (sigmaY * this.dt) / (2 * EPS0));
-        this.bEy[this.idx_g(i, j)] =
-          (1 - (sigmaY * this.dt) / (2 * EPS0)) /
-          (1 + (sigmaY * this.dt) / (2 * EPS0));
+    // Fill in coeefficient arrays for Ez
+    for (let i = 0; i < this.rows; i++) {
+      for (let j = 0; j < this.cols; j++) {
+        const idx = this.idx_g(i, j);
+        const b =
+          1 / this.dt +
+          (this.sigma_x[idx] + this.sigma_y[idx]) / (2 * EPS0) +
+          (this.sigma_x[idx] * this.sigma_y[idx] * this.dt) / (4 * EPS0 * EPS0);
+        const a =
+          (1 / this.dt -
+            (this.sigma_x[idx] + this.sigma_y[idx]) / (2 * EPS0) -
+            (this.sigma_x[idx] * this.sigma_y[idx] * this.dt) /
+              (4 * EPS0 * EPS0)) /
+          b;
+        const c =
+          ((1 / b) * (this.sigma_x[idx] * this.sigma_y[idx] * this.dt)) /
+          (EPS0 * EPS0);
 
-        this.bHy[this.idx_cHy(i, j)] =
-          (1 - (sigmaY_m * this.dt) / (2 * MU0)) /
-          (1 + (sigmaY_m * this.dt) / (2 * MU0));
-
-        this.cHy[this.idx_cHy(i, j)] =
-          this.dt / MU0 / (1 + (sigmaY_m * this.dt) / (2 * MU0));
+        const d = (1 / b) * (1 / (EPS0 * this.eps[idx]));
+        this.aEz[idx] = a;
+        this.bEz[idx] = c;
+        this.cEz[idx] = d;
       }
     }
 
-    for (let i = this.rows - down; i < this.rows; i++) {
-      const s = Math.pow((i + 1 - (this.rows - down)) / down, m);
-
+    // Fill in coefficient arrays for Hx
+    for (let i = 0; i < this.rows; i++) {
       for (let j = 0; j < this.cols; j++) {
-        const sigmaY = s * sigma_max_down;
-        const sigmaY_m = (MU0 / EPS0) * sigmaY; // magnetic field
+        const idx = this.idx_g(i, j);
+        const f = 1 / this.dt + this.sigma_y[idx] / (2 * EPS0);
+        const mu_r = MU0 * this.mu_x[this.idx_cHx(i, j + 1)];
 
-        this.cEy[this.idx_g(i, j)] =
-          this.dt / EPS0 / (1 + (sigmaY * this.dt) / (2 * EPS0));
-        this.bEy[this.idx_g(i, j)] =
-          (1 - (sigmaY * this.dt) / (2 * EPS0)) /
-          (1 + (sigmaY * this.dt) / (2 * EPS0));
+        const a = (1 / this.dt - this.sigma_y[idx] / (2 * EPS0)) / f;
+        const b = 1 / mu_r / f;
+        const c = (this.dt * this.sigma_x[idx]) / (mu_r * EPS0) / f;
 
-        this.bHy[this.idx_cHy(i, j)] =
-          (1 - (sigmaY_m * this.dt) / (2 * MU0)) /
-          (1 + (sigmaY_m * this.dt) / (2 * MU0));
-
-        this.cHy[this.idx_cHy(i, j)] =
-          this.dt / MU0 / (1 + (sigmaY_m * this.dt) / (2 * MU0));
+        this.aHx[this.idx_cHx(i, j + 1)] = a;
+        this.bHx[this.idx_cHx(i, j + 1)] = b;
+        this.cHx[this.idx_cHx(i, j + 1)] = c;
       }
     }
+
+    // Fill in coefficient arrays for Hy
+    for (let i = 0; i < this.rows; i++) {
+      for (let j = 0; j < this.cols; j++) {
+        const idx = this.idx_g(i, j);
+        const f = 1 / this.dt + this.sigma_x[idx] / (2 * EPS0);
+        const mu_r = MU0 * this.mu_y[this.idx_cHy(i + 1, j)];
+
+        const a = (1 / this.dt - this.sigma_x[idx] / (2 * EPS0)) / f;
+        const b = 1 / mu_r / f;
+        const c = (this.dt * this.sigma_y[idx]) / (mu_r * EPS0) / f;
+
+        this.aHy[this.idx_cHy(i + 1, j)] = a;
+        this.bHy[this.idx_cHy(i + 1, j)] = b;
+        this.cHy[this.idx_cHy(i + 1, j)] = c;
+      }
+    }
+  }
+
+  // UPML implementation
+  private computeNextE_z(k: number, i: number, j: number): number {
+    const Ez_k = this.Ez[this.idx_Ez(k - 1, i, j)];
+
+    const idx = this.idx_g(i, j);
+    const acc = this.Ez_acc[idx];
+
+    // The grids might be staggered, but the indexing is not.
+    // I.e. i+1/2 in E grid <=> i in H grid
+    let corr_H = 0;
+    if (j == this.huygens_j) {
+      // Inside (total field)
+      corr_H = -this.Hy_inc_at(k + 0.5, i, this.huygens_j - 1 + 0.5) / this.dx;
+    }
+    const z_curl_base =
+      (this.Hy[this.idx_Hy(k, i, j)] - this.Hy[this.idx_Hy(k, i, j - 1)]) /
+        this.dx -
+      (this.Hx[this.idx_Hx(k, i, j)] - this.Hx[this.idx_Hx(k, i - 1, j)]) /
+        this.dy;
+
+    const z_curl = z_curl_base + corr_H;
+
+    const a = this.aEz[idx];
+    const b = this.bEz[idx];
+    const c = this.cEz[idx];
+
+    return a * Ez_k + b * acc + c * z_curl;
+  }
+
+  /**
+   * next := k+1/2
+   */
+  private computeNextH_x(k: number, i: number, j: number) {
+    const H_x_k = this.Hx[this.idx_Hx(k - 1, i, j)];
+
+    const acc_dy =
+      (this.Ez_acc[this.idx_g(i, j)] - this.Ez_acc[this.idx_g(i - 1, j)]) /
+      this.dy;
+    const x_curl =
+      (this.Ez[this.idx_Ez(k - 1, i + 1, j)] -
+        this.Ez[this.idx_Ez(k - 1, i, j)]) /
+      this.dy;
+
+    const a = this.aHx[this.idx_cHx(i, j)];
+    const b = this.bHx[this.idx_cHx(i, j)];
+    const c = this.cHx[this.idx_cHx(i, j)];
+
+    return a * H_x_k + b * x_curl + c * acc_dy;
+  }
+
+  /**
+   * next := k+1/2
+   */
+  private computeNextH_y(k: number, i: number, j: number) {
+    const H_y_k = this.Hy[this.idx_Hy(k - 1, i, j)];
+
+    const acc_dx =
+      (this.Ez_acc[this.idx_g(i, j)] - this.Ez_acc[this.idx_g(i, j - 1)]) /
+      this.dx;
+
+    // Correction term for TS/SF boundary
+    let corr_E = 0;
+    if (j === this.huygens_j - 1) {
+      // Outside (scattered field)
+      corr_E = -this.Ez_inc_at(k, i, this.huygens_j) / this.dx;
+    }
+    const y_curl_base =
+      (this.Ez[this.idx_Ez(k - 1, i, j + 1)] -
+        this.Ez[this.idx_Ez(k - 1, i, j)]) /
+      this.dx;
+
+    const y_curl = y_curl_base + corr_E;
+
+    const a = this.aHy[this.idx_cHy(i, j)];
+    const b = this.bHy[this.idx_cHy(i, j)];
+    const c = this.cHy[this.idx_cHy(i, j)];
+
+    return a * H_y_k + b * y_curl + c * acc_dx;
   }
 
   private Hy_inc_at(k: number, i: number, j: number) {
@@ -244,79 +313,39 @@ export class Simulator {
     return E;
   }
 
-  /**
-   * next := k+1/2
-   */
-  private computeNextH_x(k: number, i: number, j: number) {
-    const H_x_k = this.Hx[this.idx_Hx(k - 1, i, j)];
+  public runSimulation() {
+    for (let epoch = 1; epoch < this.epochs; epoch++) {
+      // update Ez_acc for current epoch based on previous Ez
+      for (let i = 0; i < this.rows; i++) {
+        for (let j = 0; j < this.cols; j++) {
+          this.Ez_acc[this.idx_g(i, j)] +=
+            this.Ez[this.idx_Ez(epoch - 1, i, j)];
+        }
+      }
 
-    const x_curl =
-      (this.Ez[this.idx_Ez(k - 1, i + 1, j)] -
-        this.Ez[this.idx_Ez(k - 1, i, j)]) /
-      this.dy;
+      // We leave out the first and last row as they have no Ez neighbours
+      // and we ignore the outer boundary of Ez anyway
+      for (let i = 1; i < this.rows; i++) {
+        for (let j = 0; j < this.cols; j++) {
+          this.Hx[this.idx_Hx(epoch, i, j)] = this.computeNextH_x(epoch, i, j);
+        }
+      }
+      // We leave out the first and last column as they have no Ez neighbours
+      // and we ignore the outer boundary of Ez anyway
+      for (let i = 0; i < this.rows; i++) {
+        for (let j = 1; j < this.cols; j++) {
+          this.Hy[this.idx_Hy(epoch, i, j)] = this.computeNextH_y(epoch, i, j);
+        }
+      }
+      for (let i = 1; i < this.rows - 1; i++) {
+        for (let j = 1; j < this.cols - 1; j++) {
+          // In rewrite multiply to get branchless code
+          if (this.pec[this.idx_g(i, j)] === 0) continue; // skip perfect conductor
 
-    const c = this.cHx[this.idx_cHx(i, j)];
-    const b = this.bHx[this.idx_cHx(i, j)];
-
-    return b * H_x_k - c * x_curl;
-  }
-
-  /**
-   * next := k+1/2
-   */
-  private computeNextH_y(k: number, i: number, j: number) {
-    const H_y_k = this.Hy[this.idx_Hy(k - 1, i, j)];
-
-    // Correction term for TS/SF boundary
-    let corr_E = 0;
-    if (j === this.huygens_j - 1) {
-      // Outside (scattered field)
-      corr_E = -this.Ez_inc_at(k, i, this.huygens_j) / this.dx;
+          this.Ez[this.idx_Ez(epoch, i, j)] = this.computeNextE_z(epoch, i, j);
+        }
+      }
     }
-    const y_curl =
-      (this.Ez[this.idx_Ez(k - 1, i, j + 1)] -
-        this.Ez[this.idx_Ez(k - 1, i, j)]) /
-      this.dx;
-    const c = this.cHy[this.idx_cHy(i, j)];
-    const b = this.bHy[this.idx_cHy(i, j)];
-
-    return b * H_y_k + c * (y_curl + corr_E);
-  }
-
-  /**
-   * next := k+1
-   */
-  private computeNextE_zx(k: number, i: number, j: number) {
-    const Ezx_k = this.Ezx[this.idx_Ez(k - 1, i, j)];
-
-    // The grids might be staggered, but the indexing is not.
-    // I.e. i+1/2 in E grid <=> i in H grid
-    let corr_H = 0;
-    if (j == this.huygens_j) {
-      // Inside (total field)
-      corr_H = -this.Hy_inc_at(k + 0.5, i, this.huygens_j - 1 + 0.5) / this.dx;
-    }
-    const z_curl =
-      (this.Hy[this.idx_Hy(k, i, j)] - this.Hy[this.idx_Hy(k, i, j - 1)]) /
-      this.dx;
-
-    // maybe idx_g is the wrong index function here
-    const c = this.cEx[this.idx_g(i, j)];
-    const b = this.bEx[this.idx_g(i, j)];
-
-    return b * Ezx_k + c * (z_curl + corr_H);
-  }
-
-  private computeNextE_zy(k: number, i: number, j: number) {
-    const Ezy_k = this.Ezy[this.idx_Ez(k - 1, i, j)];
-
-    const z_curl =
-      (this.Hx[this.idx_Hx(k, i, j)] - this.Hx[this.idx_Hx(k, i - 1, j)]) /
-      this.dy;
-    const c = this.cEy[this.idx_g(i, j)];
-    const b = this.bEy[this.idx_g(i, j)];
-
-    return b * Ezy_k - c * z_curl;
   }
 
   // Soft source
@@ -331,29 +360,6 @@ export class Simulator {
 
   sine(t: number, f0: number) {
     return Math.sin(2 * Math.PI * f0 * t);
-  }
-
-  injectSoftEz(epoch: number) {
-    const t = epoch * this.dt;
-    const gs = this.E0 * this.gaussSine(t, this.f0, this.t0, this.tau);
-
-    for (const [i, j] of this.gaussSineSourcePositions) {
-      this.Ezx[this.idx_Ez(epoch, i, j)] += 0.5 * gs;
-      this.Ezy[this.idx_Ez(epoch, i, j)] += 0.5 * gs;
-    }
-
-    const s = this.E0 * this.sine(t, this.f0);
-    for (const [i, j] of this.sineSourcePositions) {
-      this.Ezx[this.idx_Ez(epoch, i, j)] += 0.5 * s;
-      this.Ezy[this.idx_Ez(epoch, i, j)] += 0.5 * s;
-    }
-  }
-
-  public injectGaussSineSource(x: number, y: number) {
-    this.gaussSineSourcePositions.push([x, y]);
-  }
-  public injectSineSource(x: number, y: number) {
-    this.sineSourcePositions.push([x, y]);
   }
 
   public injectRectMaterial(
@@ -377,34 +383,6 @@ export class Simulator {
       for (let j = x0; j < x0 + w; j++) {
         this.pec[this.idx_g(i, j)] = 0; // mark as perfect conductor
       }
-    }
-  }
-
-  public runSimulation() {
-    for (let epoch = 1; epoch < this.epochs; epoch++) {
-      for (let i = 0; i < this.rows; i++) {
-        for (let j = 0; j < this.cols; j++) {
-          this.Hx[this.idx_Hx(epoch, i, j)] = this.computeNextH_x(epoch, i, j);
-        }
-      }
-      for (let i = 0; i < this.rows; i++) {
-        for (let j = 0; j < this.cols; j++) {
-          this.Hy[this.idx_Hy(epoch, i, j)] = this.computeNextH_y(epoch, i, j);
-        }
-      }
-      for (let i = 1; i < this.rows - 1; i++) {
-        for (let j = 1; j < this.cols - 1; j++) {
-          // In rewrite multiply to get branchless code
-          if (this.pec[this.idx_g(i, j)] === 0) continue; // skip perfect conductor
-
-          const Ezx = this.computeNextE_zx(epoch, i, j);
-          this.Ezx[this.idx_Ez(epoch, i, j)] = Ezx;
-          const Ezy = this.computeNextE_zy(epoch, i, j);
-          this.Ezy[this.idx_Ez(epoch, i, j)] = Ezy;
-          this.Ez[this.idx_Ez(epoch, i, j)] = Ezx + Ezy;
-        }
-      }
-      this.injectSoftEz(epoch);
     }
   }
 

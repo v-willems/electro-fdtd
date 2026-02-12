@@ -41,14 +41,13 @@ const startBtn = document.getElementById(
 ) as HTMLButtonElement | null;
 if (!startBtn) throw new Error("startBtn not found");
 
-const epochs = 700;
+const epochs = 200;
 const simulator = new Simulator(epochs, 200, 400, 50);
-simulator.injectGaussSineSource(100, 100);
-simulator.injectRectMaterial(150, 1, 40, 198, 1, 10);
-simulator.injectRectPEC(50, 0, 350, 1);
-simulator.injectRectPEC(50, 198, 350, 1);
-simulator.injectRectPEC(150, 1, 40, 198);
-simulator.buildCoefficientArrays(30, 30, 0, 0);
+// simulator.injectRectMaterial(150, 1, 40, 198, 1, 10);
+// simulator.injectRectPEC(50, 0, 350, 1);
+// simulator.injectRectPEC(50, 198, 350, 1);
+// simulator.injectRectPEC(150, 1, 40, 198);
+simulator.buildUPML(30, 30, 0, 0);
 simulator.runSimulation();
 
 const { freqs, mags } = simulator.getEzStatsFrequencies(40, 50);

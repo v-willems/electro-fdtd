@@ -36,22 +36,24 @@ export class Simulator {
   private tau: number; // pulse width
 
   // UPML
-  private sigma_x: Float32Array;
-  private sigma_y: Float32Array;
+  public sigma_x: Float32Array;
+  public sigma_y: Float32Array;
 
-  private aEz: Float32Array;
-  private bEz: Float32Array;
-  private cEz: Float32Array;
+  public aEz: Float32Array;
+  public bEz: Float32Array;
+  public cEz: Float32Array;
 
-  private aHx: Float32Array;
-  private bHx: Float32Array;
-  private cHx: Float32Array;
+  public aHx: Float32Array;
+  public bHx: Float32Array;
+  public cHx: Float32Array;
 
-  private aHy: Float32Array;
-  private bHy: Float32Array;
-  private cHy: Float32Array;
+  public aHy: Float32Array;
+  public bHy: Float32Array;
+  public cHy: Float32Array;
 
-  private Ez_acc: Float32Array;
+  public Ez_acc: Float32Array;
+  public Ez_acc_dx: Float32Array;
+  public Ez_acc_dy: Float32Array;
 
   constructor(
     epochs: number,
@@ -124,6 +126,10 @@ export class Simulator {
 
     this.Ez_acc = new Float32Array(EzPlane);
     this.Ez_acc.fill(0);
+    this.Ez_acc_dx = new Float32Array(HyPlane);
+    this.Ez_acc_dx.fill(0);
+    this.Ez_acc_dy = new Float32Array(HxPlane);
+    this.Ez_acc_dy.fill(0);
   }
 
   public buildUPML(left: number, right: number, up: number, down: number) {
@@ -184,36 +190,36 @@ export class Simulator {
     }
 
     // Fill in coefficient arrays for Hx
-    for (let i = 0; i < this.rows; i++) {
-      for (let j = 0; j < this.cols; j++) {
+    for (let i = 0; i < this.rows - 1; i++) {
+      for (let j = 0; j < this.cols - 1; j++) {
         const idx = this.idx_g(i, j);
         const f = 1 / this.dt + this.sigma_y[idx] / (2 * EPS0);
-        const mu_r = MU0 * this.mu_x[this.idx_cHx(i, j + 1)];
+        const mu_r = MU0 * this.mu_x[this.idx_cHx(i, j)];
 
         const a = (1 / this.dt - this.sigma_y[idx] / (2 * EPS0)) / f;
         const b = 1 / mu_r / f;
         const c = (this.dt * this.sigma_x[idx]) / (mu_r * EPS0) / f;
 
-        this.aHx[this.idx_cHx(i, j + 1)] = a;
-        this.bHx[this.idx_cHx(i, j + 1)] = b;
-        this.cHx[this.idx_cHx(i, j + 1)] = c;
+        this.aHx[this.idx_cHx(i, j)] = a;
+        this.bHx[this.idx_cHx(i, j)] = b;
+        this.cHx[this.idx_cHx(i, j)] = c;
       }
     }
 
     // Fill in coefficient arrays for Hy
-    for (let i = 0; i < this.rows; i++) {
-      for (let j = 0; j < this.cols; j++) {
+    for (let i = 0; i < this.rows - 1; i++) {
+      for (let j = 0; j < this.cols - 1; j++) {
         const idx = this.idx_g(i, j);
         const f = 1 / this.dt + this.sigma_x[idx] / (2 * EPS0);
-        const mu_r = MU0 * this.mu_y[this.idx_cHy(i + 1, j)];
+        const mu_r = MU0 * this.mu_y[this.idx_cHy(i, j)];
 
         const a = (1 / this.dt - this.sigma_x[idx] / (2 * EPS0)) / f;
         const b = 1 / mu_r / f;
         const c = (this.dt * this.sigma_y[idx]) / (mu_r * EPS0) / f;
 
-        this.aHy[this.idx_cHy(i + 1, j)] = a;
-        this.bHy[this.idx_cHy(i + 1, j)] = b;
-        this.cHy[this.idx_cHy(i + 1, j)] = c;
+        this.aHy[this.idx_cHy(i, j)] = a;
+        this.bHy[this.idx_cHy(i, j)] = b;
+        this.cHy[this.idx_cHy(i, j)] = c;
       }
     }
   }
@@ -253,9 +259,7 @@ export class Simulator {
   private computeNextH_x(k: number, i: number, j: number) {
     const H_x_k = this.Hx[this.idx_Hx(k - 1, i, j)];
 
-    const acc_dy =
-      (this.Ez_acc[this.idx_g(i, j)] - this.Ez_acc[this.idx_g(i - 1, j)]) /
-      this.dy;
+    const acc_dy = this.Ez_acc_dy[this.idx_cHx(i, j)];
     const x_curl =
       (this.Ez[this.idx_Ez(k - 1, i + 1, j)] -
         this.Ez[this.idx_Ez(k - 1, i, j)]) /
@@ -265,7 +269,7 @@ export class Simulator {
     const b = this.bHx[this.idx_cHx(i, j)];
     const c = this.cHx[this.idx_cHx(i, j)];
 
-    return a * H_x_k + b * x_curl + c * acc_dy;
+    return a * H_x_k - b * x_curl - c * acc_dy;
   }
 
   /**
@@ -274,9 +278,7 @@ export class Simulator {
   private computeNextH_y(k: number, i: number, j: number) {
     const H_y_k = this.Hy[this.idx_Hy(k - 1, i, j)];
 
-    const acc_dx =
-      (this.Ez_acc[this.idx_g(i, j)] - this.Ez_acc[this.idx_g(i, j - 1)]) /
-      this.dx;
+    const acc_dx = this.Ez_acc_dx[this.idx_cHy(i, j)];
 
     // Correction term for TS/SF boundary
     let corr_E = 0;
@@ -295,7 +297,7 @@ export class Simulator {
     const b = this.bHy[this.idx_cHy(i, j)];
     const c = this.cHy[this.idx_cHy(i, j)];
 
-    return a * H_y_k + b * y_curl + c * acc_dx;
+    return a * H_y_k + b * y_curl - c * acc_dx;
   }
 
   private Hy_inc_at(k: number, i: number, j: number) {
@@ -314,6 +316,8 @@ export class Simulator {
   }
 
   public runSimulation() {
+    console.log(`dt / EPS0: ${this.dt / EPS0}`);
+    console.log(`dt / MU0: ${this.dt / MU0}`);
     for (let epoch = 1; epoch < this.epochs; epoch++) {
       // update Ez_acc for current epoch based on previous Ez
       for (let i = 0; i < this.rows; i++) {
@@ -322,19 +326,41 @@ export class Simulator {
             this.Ez[this.idx_Ez(epoch - 1, i, j)];
         }
       }
+      for (let i = 0; i < this.rows; i++) {
+        for (let j = 0; j < this.cols - 1; j++) {
+          const CEy =
+            (this.Ez[this.idx_Ez(epoch - 1, i, j + 1)] -
+              this.Ez[this.idx_Ez(epoch - 1, i, j)]) /
+            this.dx;
+          this.Ez_acc_dx[this.idx_cHy(i, j)] += CEy;
+        }
+      }
+      for (let i = 0; i < this.rows - 1; i++) {
+        for (let j = 0; j < this.cols; j++) {
+          const CEx =
+            (this.Ez[this.idx_Ez(epoch - 1, i + 1, j)] -
+              this.Ez[this.idx_Ez(epoch - 1, i, j)]) /
+            this.dy;
+          this.Ez_acc_dy[this.idx_cHx(i, j)] += CEx;
+        }
+      }
 
       // We leave out the first and last row as they have no Ez neighbours
       // and we ignore the outer boundary of Ez anyway
-      for (let i = 1; i < this.rows; i++) {
+      for (let i = 0; i < this.rows - 1; i++) {
         for (let j = 0; j < this.cols; j++) {
           this.Hx[this.idx_Hx(epoch, i, j)] = this.computeNextH_x(epoch, i, j);
+          if (!Number.isFinite(this.Hx[this.idx_Hx(epoch, i, j)]))
+            throw new Error(`Hx NaN at epoch ${epoch}, i ${i}, j ${j}`);
         }
       }
       // We leave out the first and last column as they have no Ez neighbours
       // and we ignore the outer boundary of Ez anyway
       for (let i = 0; i < this.rows; i++) {
-        for (let j = 1; j < this.cols; j++) {
+        for (let j = 0; j < this.cols - 1; j++) {
           this.Hy[this.idx_Hy(epoch, i, j)] = this.computeNextH_y(epoch, i, j);
+          if (!Number.isFinite(this.Hy[this.idx_Hy(epoch, i, j)]))
+            throw new Error(`Hy NaN at epoch ${epoch}, i ${i}, j ${j}`);
         }
       }
       for (let i = 1; i < this.rows - 1; i++) {
@@ -343,8 +369,14 @@ export class Simulator {
           if (this.pec[this.idx_g(i, j)] === 0) continue; // skip perfect conductor
 
           this.Ez[this.idx_Ez(epoch, i, j)] = this.computeNextE_z(epoch, i, j);
+          if (!Number.isFinite(this.Ez[this.idx_Ez(epoch, i, j)]))
+            throw new Error(`Ez NaN at epoch ${epoch}, i ${i}, j ${j}`);
         }
       }
+      // console.log(`Ez_acc ${this.Ez_acc[this.idx_g(50, 20)]}`);
+      // console.log(
+      //   `Ez ${this.Ez[this.idx_Ez(epoch, 50, 10)]} at epoch ${epoch}`,
+      // );
     }
   }
 
@@ -441,7 +473,7 @@ export class Simulator {
   }
 
   // Access cell information
-  private idx_g(row: number, col: number) {
+  public idx_g(row: number, col: number) {
     return row * this.cols + col;
   }
 

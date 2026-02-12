@@ -41,16 +41,25 @@ const startBtn = document.getElementById(
 ) as HTMLButtonElement | null;
 if (!startBtn) throw new Error("startBtn not found");
 
-const epochs = 200;
-const simulator = new Simulator(epochs, 200, 400, 50);
+const epochs = 1200;
+const sim = new Simulator(epochs, 200, 400, 70);
 // simulator.injectRectMaterial(150, 1, 40, 198, 1, 10);
 // simulator.injectRectPEC(50, 0, 350, 1);
 // simulator.injectRectPEC(50, 198, 350, 1);
 // simulator.injectRectPEC(150, 1, 40, 198);
-simulator.buildUPML(30, 30, 0, 0);
-simulator.runSimulation();
+sim.buildUPML(30, 30, 0, 0);
+// console.log(`aEz ${sim.aEz[sim.idx_g(50, 50)]}`);
+// console.log(`bEz ${sim.bEz[sim.idx_g(50, 50)]}`);
+// console.log(`cEz ${sim.cEz[sim.idx_g(50, 50)]}`);
+// console.log(`aHy ${sim.aHy[sim.idx_g(50, 50)]}`);
+// console.log(`bHy ${sim.bHy[sim.idx_g(50, 50)]}`);
+// console.log(`cHy ${sim.cHy[sim.idx_g(50, 50)]}`);
+console.log(`aHx ${sim.aHx[sim.idx_g(50, 50)]}`);
+console.log(`bHx ${sim.bHx[sim.idx_g(50, 50)]}`);
+console.log(`cHx ${sim.cHx[sim.idx_g(50, 50)]}`);
+sim.runSimulation();
 
-const { freqs, mags } = simulator.getEzStatsFrequencies(40, 50);
+const { freqs, mags } = sim.getEzStatsFrequencies(40, 50);
 
 const points: ScatterDataPoint[] = Array.from(freqs).map((f, idx) => ({
   x: f,
@@ -100,8 +109,8 @@ const viz = new Visualizer(sim_ctx, {
   clearStyle: "white",
 });
 
-let minE = +simulator.E0,
-  maxE = -simulator.E0;
+let minE = +sim.E0,
+  maxE = -sim.E0;
 // for (let t = 0; t < epochs; t++) {
 //   for (let i = 0; i < simulator.rows; i++) {
 //     for (let j = 0; j < simulator.cols; j++) {
@@ -119,7 +128,7 @@ let stopAnim: (() => void) | null = null;
 startBtn.addEventListener("click", () => {
   if (stopAnim) return; // already running
 
-  stopAnim = viz.animateEField(simulator, colorRange, {
+  stopAnim = viz.animateEField(sim, colorRange, {
     onFrame: (e) => (frameCounter.textContent = String(e)),
     loop: true, // set true to repeat
     maxFps: 60, // optional throttle

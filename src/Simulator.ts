@@ -136,26 +136,30 @@ export class Simulator {
     const m = 3;
 
     for (let j = 0; j < left; j++) {
-      const sigma = (EPS0 / (2 * this.dt)) * Math.pow((j + 1) / left, m);
+      const s = (left - j) / left;
+      const sigma = (EPS0 / (2 * this.dt)) * Math.pow(s, m);
       for (let i = 0; i < this.rows; i++) {
         this.sigma_x[this.idx_g(i, j)] = sigma;
       }
     }
     for (let j = 0; j < right; j++) {
-      const sigma = (EPS0 / (2 * this.dt)) * Math.pow((right - j) / right, m);
+      const s = (j + 1) / right;
+      const sigma = (EPS0 / (2 * this.dt)) * Math.pow(s, m);
       const idx_j = this.cols - right + j;
       for (let i = 0; i < this.rows; i++) {
         this.sigma_x[this.idx_g(i, idx_j)] = sigma;
       }
     }
     for (let i = 0; i < up; i++) {
-      const sigma = (EPS0 / (2 * this.dt)) * Math.pow((i + 1) / up, m);
+      const s = (up - i) / up;
+      const sigma = (EPS0 / (2 * this.dt)) * Math.pow(s, m);
       for (let j = 0; j < this.cols; j++) {
         this.sigma_y[this.idx_g(i, j)] = sigma;
       }
     }
     for (let i = 0; i < down; i++) {
-      const sigma = (EPS0 / (2 * this.dt)) * Math.pow((down - i) / down, m);
+      const s = (i + 1) / down;
+      const sigma = (EPS0 / (2 * this.dt)) * Math.pow(s, m);
       const idx_i = this.rows - down + i;
       for (let j = 0; j < this.cols; j++) {
         this.sigma_y[this.idx_g(idx_i, j)] = sigma;

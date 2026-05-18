@@ -41,13 +41,13 @@ const startBtn = document.getElementById(
 ) as HTMLButtonElement | null;
 if (!startBtn) throw new Error("startBtn not found");
 
-const epochs = 1200;
+const epochs = 2000;
 const sim = new Simulator(epochs, 200, 400, 70);
 // simulator.injectRectMaterial(150, 1, 40, 198, 1, 10);
 // simulator.injectRectPEC(50, 0, 350, 1);
 // simulator.injectRectPEC(50, 198, 350, 1);
 // simulator.injectRectPEC(150, 1, 40, 198);
-sim.buildUPML(30, 30, 0, 0);
+sim.buildUPML(30, 0, 0, 0);
 // console.log(`aEz ${sim.aEz[sim.idx_g(50, 50)]}`);
 // console.log(`bEz ${sim.bEz[sim.idx_g(50, 50)]}`);
 // console.log(`cEz ${sim.cEz[sim.idx_g(50, 50)]}`);

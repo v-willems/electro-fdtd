@@ -195,7 +195,7 @@ export class Simulator {
 
     // Fill in coefficient arrays for Hx
     for (let i = 0; i < this.rows - 1; i++) {
-      for (let j = 0; j < this.cols - 1; j++) {
+      for (let j = 0; j < this.cols; j++) {
         const idx = this.idx_g(i, j);
         const f = 1 / this.dt + this.sigma_y[idx] / (2 * EPS0);
         const mu_r = MU0 * this.mu_x[this.idx_cHx(i, j)];
@@ -211,7 +211,7 @@ export class Simulator {
     }
 
     // Fill in coefficient arrays for Hy
-    for (let i = 0; i < this.rows - 1; i++) {
+    for (let i = 0; i < this.rows; i++) {
       for (let j = 0; j < this.cols - 1; j++) {
         const idx = this.idx_g(i, j);
         const f = 1 / this.dt + this.sigma_x[idx] / (2 * EPS0);
@@ -326,8 +326,13 @@ export class Simulator {
       // update Ez_acc for current epoch based on previous Ez
       for (let i = 0; i < this.rows; i++) {
         for (let j = 0; j < this.cols; j++) {
-          this.Ez_acc[this.idx_g(i, j)] +=
-            this.Ez[this.idx_Ez(epoch - 1, i, j)];
+          if (
+            this.sigma_x[this.idx_g(i, j)] !== 0 &&
+            this.sigma_y[this.idx_g(i, j)] !== 0
+          ) {
+            this.Ez_acc[this.idx_g(i, j)] +=
+              this.Ez[this.idx_Ez(epoch - 1, i, j)];
+          }
         }
       }
       for (let i = 0; i < this.rows; i++) {
@@ -336,7 +341,13 @@ export class Simulator {
             (this.Ez[this.idx_Ez(epoch - 1, i, j + 1)] -
               this.Ez[this.idx_Ez(epoch - 1, i, j)]) /
             this.dx;
-          this.Ez_acc_dx[this.idx_cHy(i, j)] += CEy;
+
+          if (
+            this.sigma_x[this.idx_g(i, j)] !== 0 &&
+            this.sigma_y[this.idx_g(i, j)] !== 0
+          ) {
+            this.Ez_acc_dx[this.idx_cHy(i, j)] += CEy;
+          }
         }
       }
       for (let i = 0; i < this.rows - 1; i++) {
@@ -345,7 +356,12 @@ export class Simulator {
             (this.Ez[this.idx_Ez(epoch - 1, i + 1, j)] -
               this.Ez[this.idx_Ez(epoch - 1, i, j)]) /
             this.dy;
-          this.Ez_acc_dy[this.idx_cHx(i, j)] += CEx;
+          if (
+            this.sigma_x[this.idx_g(i, j)] !== 0 &&
+            this.sigma_y[this.idx_g(i, j)] !== 0
+          ) {
+            this.Ez_acc_dy[this.idx_cHx(i, j)] += CEx;
+          }
         }
       }
 

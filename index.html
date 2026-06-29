@@ -6,16 +6,22 @@
     <title>Canvas + TypeScript</title>
     <style>
       html, body { height: 100%; margin: 0; }
+
+      #canvasWrapper {
+        margin-top: 20px;
+      }
     </style>
   </head>
   <body>
     <div id="framecounter">0</div>
     <button id="startBtn" type="button">Start simulation</button>
-    <div>
-       <canvas height="500" width="500" id="grid"></canvas>
-       <div></div>
-       <canvas height="500" width="500" id="chart"></canvas>
+
+    <div id="canvasWrapper">
+      <canvas height="500" width="500" id="grid"></canvas>
+      <div></div>
+      <canvas height="500" width="500" id="chart"></canvas>
     </div>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
